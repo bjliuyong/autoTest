@@ -1,0 +1,222 @@
+# =============================================================================
+#  闸机自动化测试 + DeepSeek Harness 失败分析  主配置
+#  所有可调项都在这里，改完重启脚本即可，不需要动 Python 代码。
+#  路径支持相对写法，相对本文件所在目录解析。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. 测试运行参数
+# -----------------------------------------------------------------------------
+run:
+  # 每次运行的产物目录：<work_dir>/<run_id>/cases/<case_id>/...
+  work_dir: ./runs
+  # 单条用例等待日志结论的最长时间（秒）。超时仍未出现"执行失败"或"离开通道"
+  # 就按"未获取到有效日志"判为不通过，并进入分析流程。
+  case_timeout_seconds: 25
+  # 日志缓冲区最多保留多少行（超过后丢弃最旧的）
+  max_buffer_lines: 200000
+  # 判定用例归属时，允许"会话创建行"早于闸机消息的行数容差（处理日志超前/滞后）
+  capture_tolerance_lines: 5
+  # 日志提取时是否把"旅客[xxx]"相关行也纳入（保证"离开通道"这类不含会话ID的行也在报告里）
+  slice_include_passenger_lines: true
+  # 分析队列落盘目录（断点续跑用），相对 work_dir
+  queue_dir: _queue
+  # 单条分析任务最多尝试次数
+  analysis_max_attempts: 2
+  # 单条用例最多抽取多少行日志交给模型（防止日志爆炸撑爆上下文）
+  max_slice_lines: 1500
+  # 日志里找不到旅客标识、但只有一个候选会话时，是否按该会话归属
+  single_session_fallback: true
+  # 心跳日志间隔（秒）：定期打印"已收用例/日志行数/队列"，
+  # 用来区分"在等用例"和"根本没连上"
+  heartbeat_seconds: 30
+
+# -----------------------------------------------------------------------------
+# 2. 通道 #1 —— 闸机 / 测试程序（用例输入 + 预期结果）
+#
+#    mode: client = 本程序去连它（默认，闸机当服务端推）；
+#    mode: server = 本程序自己开 WS 服务端，等测试程序/闸机连进来推（测试程序更省事）。
+#    消息格式见 docs/输入协议.md
+# -----------------------------------------------------------------------------
+gate:
+  mode: client
+  url: ws://127.0.0.1:8765/gate
+  # mode=server 时监听这些（测试程序连 ws://<host>:<port><path>）
+  listen_host: 127.0.0.1
+  listen_port: 8765
+  listen_path: /gate
+  reconnect_seconds: 3
+  max_reconnect_seconds: 30
+  ping_interval: 20
+  headers: {}
+  # 收到一条用例后是否回一条 {"type":"gate.ack","case_id":...}
+  send_ack: true
+  # 连上后立刻先发一条报文（很多中继/网关要先"订阅"才会把用例转给你）。
+  # 用不到就保持 null。示例：subscription: {"type": "subscribe", "topic": "case"}
+  subscription: null
+  # 不想折腾 WebSocket 方向？用 HTTP 推用例（程序运行时生效，端口同 report.port）：
+  #   curl.exe -X POST http://127.0.0.1:8767/api/case -H "Content-Type: application/json" ^
+  #     -d "{\"case_id\":\"C-1\",\"expected\":{\"allow_pass\":true},\"capture\":{\"cert_no\":\"110101\"}}"
+  # 返回 {"accepted": true} 即收到；也支持一次 POST 一个用例数组。
+
+# -----------------------------------------------------------------------------
+# 3. 通道 #2 —— 待测系统日志
+#
+#    source: ws   = WebSocket 推流（默认）
+#    source: file = 待测系统只写日志文件时，持续跟随读取（tail -f）
+# -----------------------------------------------------------------------------
+logs:
+  source: ws
+  url: ws://127.0.0.1:8766/logs
+  reconnect_seconds: 3
+  max_reconnect_seconds: 30
+  ping_interval: 20
+  headers: {}
+  # 日志消息解析方式：auto（自动识别 JSON/纯文本）| text | json
+  message_format: auto
+  # json 模式下依次尝试这些字段取日志正文（支持 a.b 形式的多层路径）
+  text_fields: [line, text, message, msg, content, log, data.line, data.text, data]
+  # 连接成功后立即下发的订阅报文（可选，null 表示不发）
+  subscription: null
+  # --- source: file 时生效：持续跟随读取日志文件（tail -f）------------------
+  file:
+    path: null                 # 例如 'D:/gate/logs/flow.log'（必填）
+    # 日志文件编码。auto = 逐行自动识别（utf-8 → gbk），中文 Windows 老系统推荐 auto；
+    # 编码填错会让中文全变乱码，正则一条都匹配不到 —— 用 tools/check_channels.py 可自检
+    encoding: auto
+    poll_interval: 0.5         # 轮询间隔（秒）
+    from_beginning: false      # true = 从文件开头补读历史；false = 只读接入之后的新增
+    follow_rotation: true      # 文件被截断/轮转后自动重新打开
+    max_line_chars: 20000      # 单行最大字符数，超出截断
+
+# -----------------------------------------------------------------------------
+# 4. 日志关键文本的识别规则（正则）
+#    实际判定规则：
+#      出现 "会话ID[xx]-节点yy执行失败"  -> 实际不允许通行，失败节点 = yy
+#      出现 "旅客[zz]离开通道"          -> 实际允许通行
+# -----------------------------------------------------------------------------
+patterns:
+  # 会话起始行：[流程引擎]创建新会话<会话ID>
+  session_create: '\[流程引擎\]\s*创建新会话[：:\s]*\[?(?P<sid>[^\s\[\]，,。;；]+)\]?'
+  # 节点执行失败：会话ID[xx]-节点yy执行失败
+  node_failure: '会话ID\[(?P<sid>[^\]]+)\]\s*[-—－–:：]\s*节点\s*(?P<node>.+?)\s*执行失败'
+  # 允许通行：旅客[zz]离开通道
+  #
+  # 可以写一条，也可以写一组（任意一条命中即算命中）。被测系统换版本改了措辞，
+  # 往列表里加一条就行，不用改代码：
+  #   旅客[zz]已离开通道         ← 中间多几个字也能命中（靠 [^\n]{0,16}? 兼容）
+  #   旅客[zz]离开通道，提交成功  ← 同上
+  #   只打"提交成功"、整行没有 旅客[zz] ← 加一条 '提交成功'
+  # 不确定真实措辞时先跑：python tools\check_channels.py --only logs
+  passenger_exit:
+    - '旅客\[(?P<key>[^\]]+)\][^\n]{0,16}?离开通道'
+    - '旅客\[(?P<key>[^\]]+)\][^\n]{0,16}?(?:已放行|开闸成功|闸门已开)'
+    - '离开通道'
+    - '(?:已放行|开闸成功|闸门已开)'
+
+# -----------------------------------------------------------------------------
+# 5. 判定（预期 vs 实际）
+# -----------------------------------------------------------------------------
+judge:
+  # 节点名归一化别名表：日志里的节点名 -> 规范名。左右都按此表映射后再比较。
+  node_aliases:
+    # 证照核验: 证件核验
+  # 用采集信息里的哪些字段去匹配日志中的 旅客[xxx]（按顺序尝试）
+  passenger_keys: [cert_no, id_no, passenger_name, name, passengerName, certNo]
+  # 同一会话里既出现"执行失败"又出现"离开通道"（自相矛盾）时是否判为不通过
+  contradiction_as_failure: true
+
+# -----------------------------------------------------------------------------
+# 6. DeepSeek Harness（失败用例综合分析 / 改代码 / 提交分支）
+#
+#    模型、API 地址、API Key 都不在这里配！DSH 自己读它的 home
+#    （DSH_HOME 环境变量或 ~/.dsh）里已经配好的那一套，本程序只负责"调用一次"。
+#    → 机器上装好 DSH 并配好模型后，本节通常一行都不用改。
+# -----------------------------------------------------------------------------
+dsh:
+  enabled: true
+  # 【推荐】命令模式：直接用 PATH 里的 dsh（已装好 DSH 的机器就填这个）
+  command: dsh
+  # 脚本模式：如果你的 dsh 不在 PATH 里，或者想用离线包，就把这里填成 CLI 入口 JS，
+  # 此时 command 忽略、改用 node_exe + cli_js 启动：
+  #   cli_js: 'D:/Study/Deepseek Harness/deepseek-harness/apps/cli/lib/bin.js'
+  cli_js: null
+  node_exe: node
+  # headless profile：回答一个任务、打印结果、退出
+  profile: headless
+  # null = 沿用 DSH 自己的 home（DSH_HOME / ~/.dsh），即你已配好的模型与凭据
+  dsh_home: null
+  # 单次分析超时（秒）。深度分析可能很慢，不要设太小。
+  timeout_seconds: 1800
+  # 允许 agent 修改代码并提交分支（需要 fix.repo_path 已配置）
+  allow_code_fix: true
+  # 下面两项一般不用动：仅当需要显式覆盖 DSH 已有配置时才填
+  base_url: null
+  extra_env: {}
+  # --- 模型容量覆盖（可选，走 dsh --patch，不改动 DSH 自身配置）-------------
+  # 端点报 "max_completion_tokens=X cannot be greater than max_model_len=Y" 时填这里：
+  #   context_window = 端点真实的上下文长度（如 128000）
+  #   max_tokens     = 允许的输出上限（如 32768）
+  max_tokens: null
+  context_window: null
+  provider: null                         # 留空自动从 dsh --dump-config 读取
+  model: null                            # 同上
+  patch_plugin: llm-pi-ai                # 承载模型配置的插件 id
+  # --- 分析输入：以代码为主（只靠日志不准）---------------------------------
+  # true = 分析时读代码：模型会打开源码、定位到具体函数/分支，并给出
+  #        code_evidence（文件:行号 + 代码片段 + 为什么）
+  code_analysis: true
+  # 代码目录：不配就用 fix.repo_path。可以是 git 仓库，也可以只是普通源码目录
+  code_path: null                        # 例如 D:/Work/Project/gate-platform/gate-system
+  code_subdir: null                      # 只看代码里的某个子目录（相对 code_path）
+  # 生成"代码地图"：用日志原文搜出可疑代码位置（文件:行号 + 片段）+ 最近改动 + 文件清单
+  # 交给模型，省掉它自己 ls/grep 的探索时间（约 0.2~1s 本地开销，换来更快更准）
+  repo_map: true
+  # 分析时是否看采集照片（默认 false：照片不参与分析；人证比对类问题可临时开）
+  use_photo: false
+
+# -----------------------------------------------------------------------------
+# 7. 自动修复提交
+# -----------------------------------------------------------------------------
+fix:
+  # 待测系统代码仓库的 **git 根目录**（含 .git）。null / 空 = 只做分析，不改代码、不提交。
+  repo_path: null
+  # 若测试程序相关代码只是仓库里的一个子目录，填这里（相对仓库根）。
+  # 填了之后：只在这个目录里改代码 + 默认只提交这个目录的改动。
+  subdir: null                 # 例如 gate-system
+  # 提交范围：subdir（默认，仅在配了 subdir 时生效）| all（整个仓库）
+  commit_scope: subdir
+  # 分支名模板：以"时间 + 修复<节点>error"命名
+  branch_template: '{time}-修复{node}error'
+  time_format: '%Y%m%d-%H%M%S'
+  # 提交后是否 push 到远端同名分支
+  push: true
+  remote: origin
+  # 节点名缺失时分支名里的占位符
+  fallback_node: 未知节点
+
+# -----------------------------------------------------------------------------
+# 8. 报告输出
+# -----------------------------------------------------------------------------
+report:
+  # 采集信息里容纳照片的字段（按顺序尝试）：支持 base64 字符串、data URL、http URL、本地路径
+  photo_fields: [photo_base64, photo, photo_url, photo_path, face_image, image, images]
+  # BI 面板：每次运行在产物目录生成 dashboard.html（自动刷新）+ dashboard.json
+  dashboard: true
+  dashboard_interval: 2       # 面板刷新间隔（秒）
+  open_dashboard: false       # 启动时自动用浏览器打开面板
+  # BI 面板 HTTP 服务：直接 http://<本机IP>:8767/ 打开，不用去点 html 文件
+  serve: true
+  host: 0.0.0.0               # 0.0.0.0 = 允许局域网访问；只想本机看就填 127.0.0.1
+  port: 8767
+  # 下载 http 图片的超时时间（秒）
+  photo_url_timeout: 10
+  # 失败用例生成后自动用浏览器打开 HTML 报告
+  open_browser: false
+  # 控制台表格宽度（null = 自动）
+  console_width: null
+
+# -----------------------------------------------------------------------------
+# 9. 日志级别
+# -----------------------------------------------------------------------------
+log_level: INFO

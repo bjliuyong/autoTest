@@ -1,0 +1,22 @@
+# 运行产物
+runs/
+runs-*/
+*.log
+
+# 离线部署产物（1.6 GB，靠 tools/prepare_offline_bundle.py 重新生成，不要提交）
+vendor/
+
+# DSH 隔离 home（含凭据，绝不能提交）
+.dsh-home/
+.dsh-home*/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 测试临时目录
+.tmp-tests/
+.tmp-tests*/
+tmp-plain/
+tests/tmp-probe/

@@ -1,0 +1,139 @@
+# =============================================================================
+#  离线部署配置（D:\Work\Project\auto\config.offline.yaml）
+#  与 config.yaml 的区别：dsh 的 node / CLI 指向 vendor 里的便携副本。
+#  带【必改】的项必须按现场环境填写，其余保持默认即可。
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. 测试运行参数
+# -----------------------------------------------------------------------------
+run:
+  work_dir: ./runs
+  # 单条用例等日志结论的最长时间（秒）
+  case_timeout_seconds: 25
+  max_buffer_lines: 200000
+  capture_tolerance_lines: 5
+  slice_include_passenger_lines: true
+  queue_dir: _queue
+  analysis_max_attempts: 2
+  max_slice_lines: 1500
+  single_session_fallback: true
+
+# -----------------------------------------------------------------------------
+# 2. 【必改】WebSocket #1 —— 闸机程序（采集信息 + 预期结果）
+# -----------------------------------------------------------------------------
+gate:
+  url: ws://127.0.0.1:8765/gate          # 【必改】改成闸机程序实际的 WS 地址
+  reconnect_seconds: 3
+  max_reconnect_seconds: 30
+  ping_interval: 20
+  headers: {}                            # 需要鉴权时填，例如 {Authorization: 'Bearer xxx'}
+  send_ack: true
+
+# -----------------------------------------------------------------------------
+# 3. 【必改】WebSocket #2 —— 待测系统日志
+# -----------------------------------------------------------------------------
+logs:
+  url: ws://127.0.0.1:8766/logs          # 【必改】改成待测系统日志实际的 WS 地址
+  reconnect_seconds: 3
+  max_reconnect_seconds: 30
+  ping_interval: 20
+  headers: {}
+  message_format: auto                   # auto | text | json
+  text_fields: [line, text, message, msg, content, log, data.line, data.text, data]
+  subscription: null                     # 需要先发订阅报文时填 JSON，例如 {action: subscribe, topic: gate.log}
+
+# -----------------------------------------------------------------------------
+# 4. 【按真实日志核对】判定用的三条正则
+#    先用真实系统跑一遍，确认 logs.txt 里的原文能匹配上
+# -----------------------------------------------------------------------------
+patterns:
+  session_create: '\[流程引擎\]\s*创建新会话[：:\s]*\[?(?P<sid>[^\s\[\]，,。;；]+)\]?'
+  node_failure: '会话ID\[(?P<sid>[^\]]+)\]\s*[-—－–:：]\s*节点\s*(?P<node>.+?)\s*执行失败'
+  passenger_exit: '旅客\[(?P<key>[^\]]+)\]\s*离开通道'
+
+# -----------------------------------------------------------------------------
+# 5. 判定规则
+# -----------------------------------------------------------------------------
+judge:
+  # 日志里的节点名 -> 预期里写的规范名（两边都会先归一化去空格标点）
+  node_aliases: {}
+    # 证照核验: 证件核验
+  # 用采集信息里哪些字段去匹配日志中的 旅客[xxx]
+  passenger_keys: [cert_no, id_no, passenger_name, name, passengerName, certNo]
+  contradiction_as_failure: true
+
+# -----------------------------------------------------------------------------
+# 6. DeepSeek Harness
+#
+#  ⚠️ 模型、API 地址、API Key 都不在这里配。DSH 自己读它的 home
+#     （DSH_HOME 环境变量或 %USERPROFILE%\.dsh）里已经配好的那一套，
+#     本程序只负责"调一次 headless"，不会覆盖你的模型配置。
+#
+#  情况 A：机器上已经装好 DSH、模型和 Key 也配好了  ← 你的情况
+#      → 只要让程序找得到 dsh 命令：
+#         · 命令行敲 `dsh --help` 有输出（在 PATH 里）→ 下面什么都不用改
+#         · 不在 PATH → 把 command 改成完整路径，例如
+#              command: 'D:/tools/deepseek-harness/dsh.exe'
+#         · 或者改用脚本模式（见下方 cli_js 注释）
+#      → 千万别改 dsh_home / base_url，那会把已配好的东西覆盖掉
+#
+#  情况 B：机器上什么都没有，用本仓库打出来的离线包（vendor/）
+#      → 把 cli_js 填上，脚本模式优先于 command 模式
+# -----------------------------------------------------------------------------
+dsh:
+  enabled: true
+  # 【情况 A】PATH 里的 dsh（npm 全局装的一般是 dsh.cmd，程序会自动经 cmd /c 调用）
+  command: dsh
+  # 【情况 B】离线包脚本模式：填上 cli_js 后 command 被忽略
+  #   cli_js: ./vendor/dsh/apps/cli/lib/bin.js
+  #   node_exe: ./vendor/node/node.exe
+  cli_js: null
+  node_exe: node
+  profile: headless
+  # null = 沿用 DSH 自己的 home，也就是你已配好的模型 + 凭据。别随便改！
+  dsh_home: null
+  timeout_seconds: 1800
+  allow_code_fix: true
+  # 上面两项一般不用填；仅当要显式覆盖 DSH 已有配置时才设置
+  base_url: null
+  extra_env: {}
+    # 走内网代理时才需要，例如：
+    # HTTPS_PROXY: http://proxy.intra.example.com:8080
+    # NO_PROXY: 127.0.0.1,localhost
+  # --- 模型容量覆盖（可选，走 dsh --patch，不改动 DSH 自身配置）-------------
+  # 端点报 "max_completion_tokens=X cannot be greater than max_model_len=Y" 时填：
+  max_tokens: null                       # 例如 32768
+  context_window: null                   # 例如 128000
+  provider: null                         # 留空自动从 dsh --dump-config 读取
+  model: null
+  patch_plugin: llm-pi-ai
+  # 分析以代码为主：配上代码目录后，模型会读源码并给出 code_evidence（文件:行号）
+  code_analysis: true
+  code_path: null                        # 不配就用下面的 fix.repo_path
+  code_subdir: null
+  repo_map: true
+  use_photo: false                       # 默认不看照片
+
+# -----------------------------------------------------------------------------
+# 7. 【必改/可选】自动修复：改代码 + 提交分支
+#    repo_path 留空 = 只出分析报告，不改代码
+# -----------------------------------------------------------------------------
+fix:
+  repo_path: null                        # 【必改】例如 D:/Work/Project/gate-system
+  branch_template: '{time}-修复{node}error'
+  time_format: '%Y%m%d-%H%M%S'
+  push: false                            # 离线机通常没有远端，默认只提交本地分支
+  remote: origin
+  fallback_node: 未知节点
+
+# -----------------------------------------------------------------------------
+# 8. 报告输出
+# -----------------------------------------------------------------------------
+report:
+  photo_fields: [photo_base64, photo, photo_url, photo_path, face_image, image, images]
+  photo_url_timeout: 10
+  open_browser: false
+  console_width: null
+
+log_level: INFO

@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+<title>闸机自动化测试 · 实时大屏</title>
+<style>
+  :root {
+    --bg-0:#030914; --bg-1:#07152b; --panel:rgba(12,29,56,.78); --panel-2:rgba(9,22,44,.92);
+    --line:rgba(64,158,255,.22); --line-strong:rgba(96,190,255,.55);
+    --text:#dbeafe; --muted:#7c9bc4;
+    --blue:#3b82f6; --cyan:#22d3ee; --green:#22c55e; --red:#f43f5e; --amber:#fbbf24; --violet:#a78bfa;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body {
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    color:var(--text); background:
+      radial-gradient(1200px 600px at 12% -10%, rgba(59,130,246,.28), transparent 60%),
+      radial-gradient(900px 500px at 92% 0%, rgba(34,211,238,.20), transparent 55%),
+      radial-gradient(700px 500px at 50% 110%, rgba(167,139,250,.14), transparent 60%),
+      linear-gradient(160deg, var(--bg-0), var(--bg-1) 55%, #030b18);
+    min-height:100%;
+  }
+  body::before {
+    content:""; position:fixed; inset:0; pointer-events:none; opacity:.35;
+    background-image:
+      linear-gradient(rgba(64,158,255,.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(64,158,255,.07) 1px, transparent 1px);
+    background-size:44px 44px;
+  }
+  .wrap { position:relative; padding:18px 22px 26px; }
+  header { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .logo {
+    width:42px; height:42px; border-radius:12px; display:grid; place-items:center;
+    background:linear-gradient(135deg, rgba(59,130,246,.35), rgba(34,211,238,.18));
+    border:1px solid var(--line-strong); box-shadow:0 0 22px rgba(59,130,246,.35);
+  }
+  .logo svg { width:24px; height:24px; fill:none; stroke:var(--cyan); stroke-width:1.7; }
+  h1 {
+    margin:0; font-size:22px; letter-spacing:.5px;
+    background:linear-gradient(90deg,#93c5fd,#22d3ee 70%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .sub { font-size:12px; color:var(--muted); margin-top:2px; }
+  .clockbox { margin-left:auto; display:flex; align-items:center; gap:14px; }
+  .clock { font-family:ui-monospace,Consolas,monospace; font-size:22px; color:#e2f2ff; letter-spacing:2px; }
+  .live { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 10px var(--green); }
+  .dot.pulse { animation:pulse .7s ease-out; }
+  @keyframes pulse { 0% { transform:scale(1); } 50% { transform:scale(2.1); opacity:.5; } 100% { transform:scale(1); } }
+
+  .stage {
+    display:flex; align-items:center; gap:12px; padding:12px 16px; margin-bottom:14px;
+    border-radius:12px; border:1px solid var(--line);
+    background:linear-gradient(90deg, rgba(59,130,246,.18), rgba(12,29,56,.5));
+    box-shadow:inset 0 0 28px rgba(59,130,246,.12);
+  }
+  .stage .bar { width:4px; height:34px; border-radius:3px; background:linear-gradient(180deg,var(--cyan),var(--blue)); box-shadow:0 0 14px var(--blue); }
+  .stage b { font-size:17px; color:#eaf6ff; }
+  .stage .detail { font-size:12.5px; color:var(--muted); margin-top:3px; }
+  #meta { margin-left:auto; display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
+  #meta span { display:inline-flex; align-items:center; gap:6px; }
+
+  .grid { display:grid; grid-template-columns: 300px 1fr; gap:16px; align-items:start; }
+  @media (max-width:1100px) { .grid { grid-template-columns:1fr; } }
+
+  .panel {
+    border:1px solid var(--line); border-radius:14px; background:var(--panel);
+    box-shadow:inset 0 0 30px rgba(59,130,246,.10), 0 10px 30px rgba(2,8,20,.45);
+    padding:14px 16px;
+  }
+  .panel h2 { margin:0 0 12px; font-size:13px; font-weight:600; letter-spacing:1px; color:#9fc4ea; text-transform:uppercase; }
+
+  .ringbox { display:grid; place-items:center; padding:6px 0 2px; }
+  .ring { transform:rotate(-90deg); }
+  .ring circle { fill:none; stroke-width:11; stroke-linecap:round; }
+  .ring .track { stroke:rgba(96,165,250,.16); }
+  .ring .fill { stroke:url(#ringGrad); transition:stroke-dasharray .6s ease; filter:drop-shadow(0 0 8px rgba(34,211,238,.75)); }
+  .ringlabel { position:absolute; text-align:center; }
+  .ringwrap { position:relative; display:grid; place-items:center; }
+  #ring-pct { font-size:30px; font-weight:700; color:#eaf6ff; letter-spacing:1px;
+    text-shadow:0 0 18px rgba(34,211,238,.6); }
+  #ring-sub { font-size:12px; color:var(--muted); margin-top:2px; }
+
+  #kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .kpi {
+    display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:12px;
+    border:1px solid var(--line); background:var(--panel-2);
+    box-shadow:inset 0 0 24px rgba(59,130,246,.09);
+    transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  }
+  .kpi:hover { transform:translateY(-3px); border-color:var(--line-strong); box-shadow:0 10px 26px rgba(2,8,20,.55), inset 0 0 26px rgba(59,130,246,.2); }
+  .kpi-ic { width:38px; height:38px; border-radius:10px; display:grid; place-items:center;
+    background:rgba(59,130,246,.14); border:1px solid var(--line); }
+  .kpi-ic .ic { width:20px; height:20px; }
+  .kpi-v { font-size:26px; font-weight:700; line-height:1.1; font-family:ui-monospace,Consolas,monospace; }
+  .kpi-l { font-size:12px; color:var(--muted); margin-top:2px; }
+  .ic { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+
+  .tone-blue .kpi-ic,.tone-blue .kpi-v { color:var(--blue); }
+  .tone-green .kpi-ic,.tone-green .kpi-v { color:var(--green); }
+  .tone-red .kpi-ic,.tone-red .kpi-v { color:var(--red); }
+  .tone-cyan .kpi-ic,.tone-cyan .kpi-v { color:var(--cyan); }
+  .tone-amber .kpi-ic,.tone-amber .kpi-v { color:var(--amber); }
+  .tone-violet .kpi-ic,.tone-violet .kpi-v { color:var(--violet); }
+  .tone-dim .kpi-ic,.tone-dim .kpi-v { color:var(--muted); }
+
+  .tablepanel { margin-top:16px; }
+  table { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; }
+  thead th {
+    position:sticky; top:0; z-index:2; text-align:left; padding:9px 10px; font-size:12px;
+    letter-spacing:.6px; color:#9fc4ea; text-transform:uppercase; white-space:nowrap;
+    background:linear-gradient(180deg, rgba(16,38,70,.98), rgba(12,29,56,.92));
+    border-bottom:1px solid var(--line-strong);
+  }
+  tbody td { padding:9px 10px; border-bottom:1px solid rgba(64,158,255,.12); vertical-align:top; }
+  tbody tr:hover td { background:rgba(59,130,246,.10); }
+  .mono { font-family:ui-monospace,Consolas,monospace; white-space:nowrap; }
+  .dim { color:var(--muted); }
+  .reason { max-width:250px; color:#c7d9ef; }
+  .cause { max-width:360px; color:#b8cee8; }
+  .empty { padding:26px; text-align:center; color:var(--muted); }
+
+  .pill { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:20px; font-size:12px; border:1px solid transparent; }
+  .pill .ic { width:13px; height:13px; }
+  .pill.ok { color:var(--green); background:rgba(34,197,94,.12); border-color:rgba(34,197,94,.4); }
+  .pill.bad { color:var(--red); background:rgba(244,63,94,.12); border-color:rgba(244,63,94,.4); }
+  .pill.busy { color:var(--cyan); background:rgba(34,211,238,.12); border-color:rgba(34,211,238,.42); }
+  .pill.idle { color:var(--muted); background:rgba(124,155,196,.12); border-color:rgba(124,155,196,.35); }
+  .spin { animation:spin 1.1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  .chip { display:inline-block; padding:2px 9px; border-radius:6px; font-size:12px; }
+  .chip.violet { color:var(--violet); background:rgba(167,139,250,.14); }
+  .chip.red { color:var(--red); background:rgba(244,63,94,.14); }
+  .chip.amber { color:var(--amber); background:rgba(251,191,36,.14); }
+  .chip.dim { color:var(--muted); }
+
+  .link { display:inline-flex; align-items:center; gap:5px; color:var(--cyan); text-decoration:none; }
+  .link:hover { text-shadow:0 0 12px rgba(34,211,238,.8); }
+
+  #foot { margin-top:14px; display:flex; gap:18px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
+  #foot span { display:inline-flex; align-items:center; gap:6px; }
+  .noscript { margin:20px; padding:14px; border:1px solid var(--amber); border-radius:10px; color:var(--amber); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/><path d="M3 17l9 5 9-5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.6 2.6L16 9.7"/></symbol>
+  <symbol id="i-cross" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-spinner" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 3v3"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></symbol>
+  <symbol id="i-bug" viewBox="0 0 24 24"><rect x="8" y="8" width="8" height="10" rx="4"/><path d="M8 12H4M20 12h-4M8 16H5M19 16h-3M8 8L6 6M16 8l2-2"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2-6 3 12 2.5-6H21"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M4 9a13 13 0 0 1 16 0M7 12.5a9 9 0 0 1 10 0M10 16a5 5 0 0 1 4 0"/><path d="M12 19h.01"/></symbol>
+  <symbol id="i-report" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 12h7M9 16h5"/></symbol>
+</svg>
+
+<noscript><div class="noscript">这个面板需要启用 JavaScript 才能实时渲染。</div></noscript>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo"><svg><use href="#i-layers"></use></svg></div>
+      <div>
+        <h1>闸机自动化测试 · 实时监控大屏</h1>
+        <div class="sub">20261020-194758 · 批次运行状态</div>
+      </div>
+    </div>
+    <div class="clockbox">
+      <span class="live"><span class="dot" id="live"></span><span id="live-text">实时</span></span>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <div class="stage">
+    <div class="bar"></div>
+    <div>
+      <b id="stage">等待用例</b>
+      <div class="detail" id="stage-detail"></div>
+    </div>
+    <div id="meta"></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>通过率</h2>
+      <div class="ringwrap">
+        <svg class="ring" width="150" height="150" viewBox="0 0 130 130">
+          <circle class="track" cx="65" cy="65" r="52"></circle>
+          <circle class="fill" id="ring-fill" cx="65" cy="65" r="52"
+                  stroke-dasharray="0 327"></circle>
+        </svg>
+        <div class="ringlabel">
+          <div id="ring-pct">—</div>
+          <div id="ring-sub">等待用例</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>用例统计</h2>
+      <div id="kpis"></div>
+    </div>
+  </div>
+
+  <div class="panel tablepanel">
+    <h2>用例明细</h2>
+    <div style="overflow:auto; max-height:58vh">
+      <table>
+        <thead><tr>
+          <th>用例</th><th>结果</th><th>预期</th><th>实际</th><th>判定原因</th>
+          <th>归属</th><th>根因（摘要）</th><th>判定时间</th><th>报告</th>
+        </tr></thead>
+        <tbody id="case-body"></tbody>
+      </table>
+    </div>
+    <div id="foot"></div>
+  </div>
+</div>
+<script>window.__PAYLOAD__ = {"run_id": "20261020-194758", "run_dir": "D:\\Work\\Project\\auto\\runs-demo\\20261020-194758", "updated_at": "2026-10-20T19:48:23", "stage": "运行结束", "detail": "闸机通道：服务端模式 ws://127.0.0.1:8765/gate（等待测试程序/闸机连入）；日志来源：文件 D:\\Work\\Project\\auto\\demo-logs\\flow.log", "gate": "服务端模式 ws://127.0.0.1:8765/gate（等待测试程序/闸机连入）", "log_source": "文件 D:\\Work\\Project\\auto\\demo-logs\\flow.log", "log_lines": 13, "sessions": 3, "counters": {"用例总数": 3, "通过": 2, "不通过": 1, "其中日志超时": 0, "协议错误": 0, "已入队分析": 1, "分析完成": 0, "分析失败": 0, "分析跳过": 1}, "queue": {"pending": 0, "running": 0, "done": 1, "failed": 0}, "harness": "不可用：PATH 里找不到 dsh 命令（dsh）。机器上已装 dsh 的话，确认它在 PATH 里（或把 dsh.command 填成完整路径）；用离线包则改成脚本模式：cli_js: ./vendor/dsh/apps/cli/lib/bin.", "totals": {"cases": 3, "passed": 2, "failed": 1, "analyzing": 0, "pending": 0, "analyzed": 0, "case_issues": 0, "sut_issues": 0, "env_issues": 0, "unknown": 0}, "cases": [{"case_id": "DEMO-DENY-002", "passed": true, "result": "通过", "expected": "不允许通行 / 节点 证件核验", "actual": "不允许通行 / 节点 证件核验", "reason": "通行结论一致（不允许通行），失败节点一致：证件核验", "judged_at": "2026-10-20T19:48:10", "analysis_status": "", "status_label": "通过", "category": "unknown", "category_label": "—", "root_cause": "", "report": "DEMO-DENY-002/report.html", "session_id": "D0002"}, {"case_id": "DEMO-FAIL-003", "passed": false, "result": "不通过", "expected": "允许通行", "actual": "不允许通行 / 节点 证件核验", "reason": "通行结论不一致：预期「允许通行」，实际「不允许通行」", "judged_at": "2026-10-20T19:48:12", "analysis_status": "skipped", "status_label": "未分析", "category": "unknown", "category_label": "待定", "root_cause": "", "report": "DEMO-FAIL-003/report.html", "session_id": "D0003"}, {"case_id": "DEMO-PASS-001", "passed": true, "result": "通过", "expected": "允许通行", "actual": "允许通行", "reason": "通行结论一致（允许通行）", "judged_at": "2026-10-20T19:48:08", "analysis_status": "", "status_label": "通过", "category": "unknown", "category_label": "—", "root_cause": "", "report": "DEMO-PASS-001/report.html", "session_id": "D0001"}], "server_url": "http://127.0.0.1:8767/"};</script>
+<script>
+const P = window.__PAYLOAD__ || {};
+const REFRESH = Math.max(1, Number(P.refresh_seconds || 5)) * 1000;
+
+const ICON = {
+  total: 'i-layers', passed: 'i-check', failed: 'i-cross', analyzing: 'i-spinner',
+  pending: 'i-clock', case_issue: 'i-file', sut_issue: 'i-bug', env_issue: 'i-server',
+  unknown: 'i-alert', ok: 'i-check', bad: 'i-cross', busy: 'i-spinner', idle: 'i-clock',
+};
+
+function esc(v) {
+  return String(v === null || v === undefined ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function icon(name, cls) {
+  return '<svg class="ic ' + (cls || '') + '"><use href="#' + (ICON[name] || 'i-alert') + '"></use></svg>';
+}
+function card(key, label, value, tone) {
+  return '<div class="kpi ' + tone + '">'
+    + '<div class="kpi-ic">' + icon(key) + '</div>'
+    + '<div class="kpi-body"><div class="kpi-v" data-kpi="' + key + '">' + esc(value) + '</div>'
+    + '<div class="kpi-l">' + esc(label) + '</div></div></div>';
+}
+
+function renderKpis(t) {
+  const html = [
+    card('total', '用例总数', t.cases || 0, 'tone-blue'),
+    card('passed', '通过', t.passed || 0, 'tone-green'),
+    card('failed', '不通过', t.failed || 0, 'tone-red'),
+    card('analyzing', '分析中', t.analyzing || 0, 'tone-cyan'),
+    card('pending', '待分析', t.pending || 0, 'tone-amber'),
+    card('case_issue', '用例问题', t.case_issues || 0, 'tone-violet'),
+    card('sut_issue', '程序问题', t.sut_issues || 0, 'tone-red'),
+    card('env_issue', '环境问题', t.env_issues || 0, 'tone-amber'),
+    card('unknown', '待定', t.unknown || 0, 'tone-dim'),
+  ].join('');
+  document.getElementById('kpis').innerHTML = html;
+}
+
+function ring(t) {
+  const total = Number(t.cases || 0);
+  const passed = Number(t.passed || 0);
+  const rate = total ? passed / total : 0;
+  const circumference = 2 * Math.PI * 52;
+  const on = circumference * rate;
+  const el = document.getElementById('ring-fill');
+  if (el) {
+    el.setAttribute('stroke-dasharray', on.toFixed(1) + ' ' + (circumference - on).toFixed(1));
+  }
+  const pctEl = document.getElementById('ring-pct');
+  if (pctEl) pctEl.textContent = total ? Math.round(rate * 100) + '%' : '—';
+  const subEl = document.getElementById('ring-sub');
+  if (subEl) subEl.textContent = total ? (passed + ' / ' + total + ' 通过') : '等待用例';
+}
+
+function statusPill(c) {
+  if (c.passed) return '<span class="pill ok">' + icon('ok') + '通过</span>';
+  const s = c.analysis_status || '';
+  if (s === 'running') return '<span class="pill busy">' + icon('busy', 'spin') + '分析中</span>';
+  if (s === 'pending') return '<span class="pill idle">' + icon('pending') + '待分析</span>';
+  if (s === 'failed') return '<span class="pill bad">' + icon('bad') + '分析失败</span>';
+  if (s === 'done') return '<span class="pill bad">' + icon('bad') + '已分析</span>';
+  if (s === 'skipped') return '<span class="pill idle">' + icon('idle') + '未分析</span>';
+  return '<span class="pill bad">' + icon('bad') + '待定</span>';
+}
+
+function categoryChip(c) {
+  if (c.passed) return '<span class="chip dim">—</span>';
+  const cat = c.category || 'unknown';
+  const map = { case_issue: ['violet', '用例问题'], sut_issue: ['red', '程序问题'],
+                env_issue: ['amber', '环境问题'], unknown: ['dim', '待定'] };
+  const hit = map[cat] || map.unknown;
+  return '<span class="chip ' + hit[0] + '">' + esc(hit[1]) + '</span>';
+}
+
+function renderCases(cases) {
+  const body = document.getElementById('case-body');
+  if (!cases || !cases.length) {
+    body.innerHTML = '<tr><td colspan="10" class="empty">等待闸机/测试程序推送用例…</td></tr>';
+    return;
+  }
+  body.innerHTML = cases.map(function (c) {
+    const report = c.report
+      ? '<a class="link" href="/cases/' + esc(c.report) + '" target="_blank">' + icon('report') + '报告</a>'
+      : '<span class="dim">—</span>';
+    return '<tr>'
+      + '<td class="mono">' + esc(c.case_id) + '</td>'
+      + '<td>' + statusPill(c) + '</td>'
+      + '<td>' + esc(c.expected) + '</td>'
+      + '<td>' + esc(c.actual) + '</td>'
+      + '<td class="reason">' + esc(c.reason) + '</td>'
+      + '<td>' + categoryChip(c) + '</td>'
+      + '<td class="cause">' + esc(c.root_cause) + '</td>'
+      + '<td class="mono dim">' + esc(c.judged_at) + '</td>'
+      + '<td>' + report + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function apply(data) {
+  const t = data.totals || {};
+  renderKpis(t);
+  ring(t);
+  const stage = document.getElementById('stage');
+  if (stage) stage.textContent = data.stage || '运行中';
+  const detail = document.getElementById('stage-detail');
+  if (detail) detail.textContent = data.detail || '';
+  const meta = document.getElementById('meta');
+  if (meta) {
+    meta.innerHTML = ''
+      .concat('<span>' + icon('wifi') + '闸机 ' + esc(data.gate || '-') + '</span>')
+      .concat('<span>' + icon('file') + '日志 ' + esc(data.log_source || '-') + '</span>')
+      .concat('<span>' + icon('layers') + esc(data.log_lines || 0) + ' 行 / ' + esc(data.sessions || 0) + ' 会话</span>')
+      .concat('<span>' + icon('pulse') + '更新 ' + esc(data.updated_at || '-') + '</span>');
+  }
+  const queue = data.queue || {};
+  const foot = document.getElementById('foot');
+  if (foot) {
+    foot.innerHTML = ''
+      .concat('<span>' + icon('clock') + '队列 待分析 ' + esc(queue.pending || 0)
+        + ' / 完成 ' + esc(queue.done || 0) + ' / 失败 ' + esc(queue.failed || 0) + '</span>')
+      .concat('<span>' + icon('bug') + 'Harness ' + esc(data.harness || '-') + '</span>')
+      .concat('<span>批次 ' + esc(data.run_id || '-') + '</span>');
+  }
+  renderCases(data.cases || []);
+}
+
+function clock() {
+  const el = document.getElementById('clock');
+  if (!el) return;
+  const d = new Date();
+  const p = function (n) { return String(n).padStart(2, '0'); };
+  el.textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+let started = false;
+function tick() {
+  clock();
+  if (started) {
+    const dot = document.getElementById('live');
+    if (dot) { dot.classList.add('pulse'); setTimeout(function () { dot.classList.remove('pulse'); }, 700); }
+  }
+}
+
+function poll() {
+  fetch('/api/state', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) { if (data) { apply(data); started = true; } })
+    .catch(function () { /* 离线文件模式：忽略轮询失败 */ })
+    .then(function () { setTimeout(poll, REFRESH); });
+}
+
+apply(P);
+setInterval(tick, 1000);
+tick();
+if (location.protocol === 'http:' || location.protocol === 'https:') {
+  started = true;
+  setTimeout(poll, REFRESH);
+}
+</script>
+</body>
+</html>

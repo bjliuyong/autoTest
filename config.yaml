@@ -1,0 +1,211 @@
+# =============================================================================
+#  现场配置（基于你机器上的 config.yaml 修改）
+#
+#  数据流（不改 Node-RED、不改你的程序）：
+#      Node-RED ──ws──> 你的程序（监听 1880）
+#               └─ws──> 本程序（gate.mode: both：既连 1880，也开一个端口等对方连进来）
+#      待测系统 ──写日志文件──> 本程序持续跟随读取
+#
+#  改了哪些地方（相对你的原文件）：
+#    1) gate.mode: both           —— 两个方向都收，不管 Node-RED 是广播还是主动连我们
+#    2) gate.send_ack: false      —— 不回执，绝不给 Node-RED 的流程塞数据
+#    3) logs.file.encoding: auto  —— 原先是 utf-8，但日志实际是 GBK，中文会变乱码、正则 0 命中
+#    4) dsh.code_subDor → code_subdir（原键名拼错了，会被静默忽略 → 代码分析没生效）
+#    5) case_timeout_seconds 8 → 60、heartbeat_seconds: 20（8 秒太短，真实闸机流程来不及）
+#    6) report.serve/host/port 显式写出（BI 面板 + HTTP 推用例都靠它）
+#  注：run.work_dir 从 ./runs-selftest 改成 ./runs（如果你就想用 runs-selftest，改回来即可）
+# =============================================================================
+
+run:
+  work_dir: ./runs
+  # 单条用例等日志结论的最长时间。真实闸机流程建议 60~120 秒
+  case_timeout_seconds: 60
+  max_buffer_lines: 200000
+  capture_tolerance_lines: 5
+  slice_include_passenger_lines: true
+  queue_dir: _queue
+  # 分析失败后的重试次数（串行：一条分析跑完才开始下一条，结果有缓存）
+  analysis_max_attempts: 2
+  max_slice_lines: 1500
+  # 日志切片在「会话起点」再往前多带几行（上下文/并发用例交错的行都在这里）。
+  # 锚点 = min(创建新会话行, 第一次出现该会话ID的行)，所以创建那一行格式不符也不会漏前面。
+  slice_lead_lines: 60
+  single_session_fallback: true
+  # 心跳：每 20 秒打一行"收到几条用例 / 读了多少行日志 / 队列状态"
+  heartbeat_seconds: 20
+
+# -----------------------------------------------------------------------------
+# 通道 #1：Node-RED（1880）
+#
+#    mode: both = 既作为客户端连 ws://127.0.0.1:1880（Node-RED 广播给所有已连客户端时能收到），
+#                 又监听 listen_port（Node-RED 若有 websocket out 节点主动连我们时也能收到）。
+#                 两个方向随便哪个通都行，不用改 Node-RED、也不用改你的程序。
+#    mode: client / server = 只走单一方向。
+# -----------------------------------------------------------------------------
+gate:
+  mode: both
+  # 我们主动去连的地址（你的程序也在收这个地址的数据）
+  url: ws://127.0.0.1:1880
+  # both / server 模式下本程序监听的地址；要让 Node-RED 连进来，URL 必须正好是这个
+  listen_host: 0.0.0.0
+  listen_port: 8765
+  listen_path: /gate
+  reconnect_seconds: 2
+  max_reconnect_seconds: 10
+  ping_interval: 20
+  headers: {}
+  # 不回执：避免往 Node-RED 的 websocket in 节点里写东西、扰动你的流程
+  send_ack: false
+  # 有些中继要先"订阅"才转发；用不到就保持 null
+  subscription: null
+  # 【如果 Node-RED 发来的字段名和本程序不一样】在这里翻译，不用改 Node-RED：
+  #   左边 = 本程序认的字段，右边 = Node-RED 消息里的点路径（a.b.c）
+  #   先跑 tools\check_channels.py --save-raw gate_raw.jsonl 拿到真实报文，再照抄字段名
+  # 例（取消注释后改成你的真实字段）：
+  # field_map:
+  #   case_id: msg.payload.id
+  #   allow_pass: msg.payload.allow      # 是否允许通行：true/false、"允许"/"不允许"、1/0 都认
+  #   failed_node: msg.payload.node      # 不允许通行时的失败节点
+  #   cert_no: msg.payload.idCard        # 证件号，用来和日志里的 旅客[xxx] 对上号
+  #   passenger_name: msg.payload.name
+  field_map: {}
+  # --- 一轮测试 = 十几条消息，只有一条带预期结果 -----------------------------
+  # 用 serial 判断"是不是同一轮"：按顺序取这些字段里第一个非空值
+  round_keys: [serial, Serial, serialNo, serial_no, requestId, request_id,
+               capture.serial, capture.cert_no, cert_no]
+  # 轮次键里含 "_" 时只取前半段：serial_123 与 serial_456 视为同一轮。
+  # 不想切就写 null。
+  round_split: '_'
+  # 多久没消息就把这轮记录忘掉（秒）
+  round_ttl_seconds: 600
+  # 原理：收到"这一轮第一条消息"时记下当时的日志行号；等带预期结果的那条到了，
+  # 用更早的那个行号做日志切片起点 —— 否则切片会从中间开始，漏掉"创建新会话"那几行。
+  # 同一轮里其它（不带预期结果的）消息会被安静忽略，不计入"协议错误"。
+
+# -----------------------------------------------------------------------------
+# 通道 #2：待测系统日志（读文件）
+# -----------------------------------------------------------------------------
+logs:
+  source: file
+  file:
+    path: D:/code/work/build/bin/logs/biisapp_2026-10-21.log
+    # auto = 逐行自动识别 utf-8 / gbk。你的日志是 GBK：
+    #   用 utf-8 硬解 → 中文变 ���� → 节点失败/离开通道 正则一条都匹配不到
+    encoding: auto
+    poll_interval: 0.5
+    from_beginning: false      # true = 连历史一起补读
+    follow_rotation: true
+    max_line_chars: 20000
+  # 单行里超过这个长度的字段（base64 图片、长 hex 块）只保留前 N 个字符并标注总长度。
+  # 0 = 不截断。设 100 能显著压小日志体积，避免把模型上下文撑爆。
+  max_field_chars: 100
+  # 自动识别编码后仍是乱码的行直接丢掉（不进日志切片、不进模型输入）
+  drop_undecodable: true
+
+# 日志里三条关键文案（判定全靠它们）
+#
+# 每一项都可以写成「一条正则」或「一组正则」，**任意一条命中就算命中**。
+# 被测系统换版本改了措辞时，只要往列表里加一条，不用改代码：
+#
+#   patterns:
+#     passenger_exit:
+#       - '旅客\[(?P<key>[^\]]+)\][^\n]{0,16}?离开通道'
+#       - '旅客\[(?P<key>[^\]]+)\][^\n]{0,16}?提交成功'   # 新版本只打这句时加这条
+#       - '离开通道'
+#
+# 不确定真实措辞时先跑：python tools\check_channels.py --only logs
+# 它会把「最近 500 行的真实行样」直接打印出来，照抄进列表即可。
+patterns:
+  session_create: '\[流程引擎\]\s*创建新会话[：:\s]*\[?(?P<sid>[^\s\[\]，,。;；]+)\]?'
+  node_failure: '会话ID\[(?P<sid>[^\]]+)\]\s*[-—－–:：]\s*节点\s*(?P<node>.+?)\s*执行失败'
+  # 「允许通行」的结论事件。默认给了一组：允许中间夹字（已离开通道 / 离开通道，提交成功）、
+  # 也允许整行没有 旅客[...] 标记（最后两条兜底）。
+  passenger_exit:
+    - '旅客\[(?P<key>[^\]]+)\][^\n]{0,16}?离开通道'
+    - '旅客\[(?P<key>[^\]]+)\][^\n]{0,16}?(?:已放行|开闸成功|闸门已开)'
+    - '离开通道'
+    - '(?:已放行|开闸成功|闸门已开)'
+
+judge:
+  node_aliases: {}
+  # 用采集信息里的哪些字段去匹配日志中的 旅客[xxx]（按顺序尝试）
+  # 注：case_id 也列上 —— 你的 Node-RED 把 case_id 填成了 docData.DocNum（证件号），
+  #     如果日志里 旅客[...] 用的是证件号，它比 capture.cert_no（=serial）更容易匹配上。
+  passenger_keys: [cert_no, case_id, passenger_name, id_no, name, passengerName, certNo]
+  contradiction_as_failure: true
+
+# -----------------------------------------------------------------------------
+# DeepSeek Harness（失败分析；模型/API/Key 沿用 DSH 自己的配置）
+# -----------------------------------------------------------------------------
+dsh:
+  enabled: true
+  # dsh 命令：机器上已经装好、能直接调通就保持 "dsh"；
+  # 如果它在固定位置（例如 DSH 桌面版），填完整路径更稳：
+  #   command: C:/Users/admin/AppData/Roaming/dsh-desktop/harness/.desktop-bin/dsh.CMD
+  command: dsh
+  cli_js: null
+  node_exe: node
+  # 启动方式：cmd = 用 cmd /c 调 dsh.cmd（默认，和你手敲完全一致，
+  #   .cmd 里 set 的 DSH_HOME / 凭据路径都会生效）；
+  #   direct = 绕过 cmd 直接起 node（停止分析更干脆，但可能丢 .cmd 里的环境设置）
+  launch_mode: cmd
+  profile: headless
+  dsh_home: null
+  # 单次分析的总时长硬上限（秒）。0 = 不限时长（慢模型推荐）。
+  timeout_seconds: 0
+  # 连续多少秒"完全没有输出"才判定卡死并终止。慢模型只要还在出字就不会被掐断。
+  idle_timeout_seconds: 1800
+  allow_code_fix: true
+  # --- 模型容量（关键：端点上下文 128k 时必须显式写，否则会撑爆）--------------
+  # 我的部署端最大上下文 128000 tokens。输出上限写死一个合理值，
+  # 剩下的全留给输入（日志切片 + 代码地图 + 模型自己读文件）。
+  context_window: 128000
+  max_tokens: 24000
+  # 给"输入"预留的 tokens。输出上限会自动收敛到 context_window - 这个值，
+  # 避免端点报 CONTEXT_WINDOW_EXCEEDED（现场报过：输出 110046 + 输入 17955 → 128001）。
+  input_reserve_tokens: null      # 默认 32768
+  # 声明给 DSH 的上下文会比真实上限**再小这么多**（默认 8192）。
+  # 这条是"确保不再撞 400"的关键：即使端点忽略 maxTokens、把输出上限算成
+  # "上下文 − 输入"，输入+输出也只会等于"缩小后的上下文"，永远碰不到真实上限。
+  context_headroom_tokens: 24576
+  # dsh --dump-config 的超时（秒）：它挂住会把整条分析队列卡死
+  dump_timeout_seconds: 60
+  provider: null
+  model: null
+  patch_plugin: llm-pi-ai
+  code_analysis: true
+  code_path: D:/code/work/mpf-biis-smt
+  # 原先写成 code_subDor（大写 D）→ 被当成未知键忽略，代码分析实际没生效。
+  # 现在填错会直接报错并提示。
+  code_subdir: smtPassengerInspect
+  repo_map: true
+  use_photo: false
+
+# -----------------------------------------------------------------------------
+# 自动修复：改代码 + 提交到「时间-修复<节点>error」分支
+# -----------------------------------------------------------------------------
+fix:
+  repo_path: D:/code/work/mpf-biis-smt
+  subdir: smtPassengerInspect
+  commit_scope: subdir
+  branch_template: '{time}-修复{node}error'
+  time_format: '%Y%m%d-%H%M%S'
+  # 内网没有远端就改成 false（只提交本地分支，避免每条都因 push 失败报警）
+  push: true
+  remote: origin
+  fallback_node: 未知节点
+
+report:
+  photo_fields: [photo_base64, photo, photo_url, photo_path, face_image, image, images]
+  photo_url_timeout: 10
+  dashboard: true
+  dashboard_interval: 2
+  open_dashboard: false
+  # BI 面板 + HTTP 推用例（POST /api/case）：直接 http://<本机IP>:8767/ 打开
+  serve: true
+  host: 0.0.0.0
+  port: 8767            # 填 0 = 由系统自动挑一个空闲端口
+  open_browser: false
+  console_width: null
+
+log_level: INFO

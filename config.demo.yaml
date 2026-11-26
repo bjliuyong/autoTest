@@ -1,0 +1,62 @@
+# =============================================================================
+#  演示配置：闸机通道「服务端模式」 + 日志从「文件」读取 + BI 面板
+#  配套：python tools\demo_driver.py --log-file ./demo-logs/flow.log
+# =============================================================================
+
+run:
+  work_dir: ./runs-demo
+  case_timeout_seconds: 15
+  queue_dir: _queue
+  analysis_max_attempts: 2
+
+gate:
+  # 本程序监听，测试程序连进来推用例
+  mode: server
+  listen_host: 127.0.0.1
+  listen_port: 8765
+  listen_path: /gate
+  send_ack: true
+
+logs:
+  # 待测系统不推 WebSocket，改成持续读取日志文件
+  source: file
+  file:
+    path: ./demo-logs/flow.log
+    encoding: auto
+    poll_interval: 0.3
+    from_beginning: false
+    follow_rotation: true
+
+patterns:
+  session_create: '\[流程引擎\]\s*创建新会话[：:\s]*\[?(?P<sid>[^\s\[\]，,。;；]+)\]?'
+  node_failure: '会话ID\[(?P<sid>[^\]]+)\]\s*[-—－–:：]\s*节点\s*(?P<node>.+?)\s*执行失败'
+  passenger_exit: '旅客\[(?P<key>[^\]]+)\]\s*离开通道'
+
+judge:
+  passenger_keys: [cert_no, passenger_name, name]
+  contradiction_as_failure: true
+
+dsh:
+  enabled: true
+  command: dsh
+  cli_js: null
+  profile: headless
+  dsh_home: null
+  timeout_seconds: 1800
+  allow_code_fix: true
+  max_tokens: null
+  context_window: null
+
+fix:
+  repo_path: null
+
+report:
+  dashboard: true
+  dashboard_interval: 1
+  open_dashboard: false
+  # BI 面板 HTTP 服务：跑起来后浏览器直接开 http://<本机IP>:8767/
+  serve: true
+  host: 0.0.0.0
+  port: 8767
+
+log_level: INFO

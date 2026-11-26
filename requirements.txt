@@ -1,0 +1,5 @@
+# 闸机自动化测试 + DeepSeek Harness 失败分析
+# Python >= 3.10
+websockets>=14.0
+PyYAML>=6.0
+rich>=13.0

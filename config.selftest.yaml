@@ -1,0 +1,82 @@
+# =============================================================================
+#  自测配置：配合 python tools/mock_servers.py 使用，验证全链路
+#  （双 WebSocket → 判定 → 报告 → 失败用例串行分析 → 修复分支）
+# =============================================================================
+
+run:
+  work_dir: ./runs-selftest
+  # 模拟服务端每 6s 推一条用例，超时设 8s
+  case_timeout_seconds: 8
+  max_buffer_lines: 200000
+  capture_tolerance_lines: 5
+  slice_include_passenger_lines: true
+  queue_dir: _queue
+  analysis_max_attempts: 1
+  max_slice_lines: 1500
+  single_session_fallback: true
+
+gate:
+  url: ws://127.0.0.1:8765/gate
+  reconnect_seconds: 2
+  max_reconnect_seconds: 10
+  ping_interval: 20
+  headers: {}
+  send_ack: true
+
+logs:
+  url: ws://127.0.0.1:8766/logs
+  reconnect_seconds: 2
+  max_reconnect_seconds: 10
+  ping_interval: 20
+  headers: {}
+  message_format: auto
+  text_fields: [line, text, message, msg, content, log, data.line, data.text, data]
+  subscription: null
+
+patterns:
+  session_create: '\[流程引擎\]\s*创建新会话[：:\s]*\[?(?P<sid>[^\s\[\]，,。;；]+)\]?'
+  node_failure: '会话ID\[(?P<sid>[^\]]+)\]\s*[-—－–:：]\s*节点\s*(?P<node>.+?)\s*执行失败'
+  passenger_exit: '旅客\[(?P<key>[^\]]+)\]\s*离开通道'
+
+judge:
+  node_aliases: {}
+  passenger_keys: [cert_no, id_no, passenger_name, name, passengerName, certNo]
+  contradiction_as_failure: true
+
+dsh:
+  enabled: true
+  # 命令模式：直接用 PATH 里的 dsh（模型/API/Key 沿用 DSH 自己的配置，无需在此配置）
+  command: dsh
+  # 脚本模式（仅当机器上没有 dsh 命令、但有 DSH 源码或离线包时才用；填了它 command 被忽略）
+  #   cli_js: 'D:/Study/Deepseek Harness/deepseek-harness/apps/cli/lib/bin.js'
+  #   node_exe: node
+  cli_js: null
+  node_exe: node
+  profile: headless
+  # null = 沿用 DSH 自己的 home（DSH_HOME 环境变量或 ~/.dsh）
+  dsh_home: null
+  timeout_seconds: 1800
+  allow_code_fix: true
+  # 模型容量覆盖（可选）：端点报 "max_completion_tokens ... greater than max_model_len" 时填
+  max_tokens: null
+  context_window: null
+  provider: null
+  model: null
+  patch_plugin: llm-pi-ai
+
+fix:
+  # 留空 = 只分析，不改代码
+  repo_path: null
+  branch_template: '{time}-修复{node}error'
+  time_format: '%Y%m%d-%H%M%S'
+  push: true
+  remote: origin
+  fallback_node: 未知节点
+
+report:
+  photo_fields: [photo_base64, photo, photo_url, photo_path, face_image, image, images]
+  photo_url_timeout: 10
+  open_browser: false
+  console_width: null
+
+log_level: INFO
