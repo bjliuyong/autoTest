@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.autotest.mapper.AutoTestCaseMapper">
+    
+    <resultMap type="AutoTestCase" id="AutoTestCaseResult">
+        <result property="caseRecordId"        column="case_record_id"        />
+        <result property="batchId"             column="batch_id"              />
+        <result property="batchNo"             column="batch_no"              />
+        <result property="caseId"              column="case_id"               />
+        <result property="serial"              column="serial"                />
+        <result property="gateId"              column="gate_id"               />
+        <result property="passengerName"       column="passenger_name"        />
+        <result property="certType"            column="cert_type"             />
+        <result property="certNo"              column="cert_no"               />
+        <result property="photoUrl"            column="photo_url"             />
+        <result property="sessionId"           column="session_id"            />
+        <result property="expectedAllowPass"   column="expected_allow_pass"   />
+        <result property="expectedFailedNode"  column="expected_failed_node"  />
+        <result property="actualAllowPass"     column="actual_allow_pass"     />
+        <result property="actualFailedNode"    column="actual_failed_node"    />
+        <result property="verdict"             column="verdict"               />
+        <result property="reasons"             column="reasons"               />
+        <result property="rawCapture"          column="raw_capture"           />
+        <result property="logSlice"            column="log_slice"             />
+        <result property="durationMs"          column="duration_ms"           />
+        <result property="receivedTime"        column="received_time"         />
+        <result property="finishTime"          column="finish_time"           />
+        <result property="createTime"          column="create_time"           />
+    </resultMap>
+
+    <sql id="selectAutoTestCaseVo">
+        select case_record_id, batch_id, batch_no, case_id, serial, gate_id, passenger_name, cert_type, cert_no, photo_url, session_id, expected_allow_pass, expected_failed_node, actual_allow_pass, actual_failed_node, verdict, reasons, raw_capture, log_slice, duration_ms, received_time, finish_time, create_time from auto_test_case
+    </sql>
+
+    <select id="selectAutoTestCaseList" parameterType="AutoTestCase" resultMap="AutoTestCaseResult">
+        <include refid="selectAutoTestCaseVo"/>
+        <where>  
+            <if test="batchId != null"> and batch_id = #{batchId}</if>
+            <if test="batchNo != null and batchNo != ''"> and batch_no = #{batchNo}</if>
+            <if test="caseId != null and caseId != ''"> and case_id like concat('%', #{caseId}, '%')</if>
+            <if test="passengerName != null and passengerName != ''"> and passenger_name like concat('%', #{passengerName}, '%')</if>
+            <if test="certNo != null and certNo != ''"> and cert_no like concat('%', #{certNo}, '%')</if>
+            <if test="gateId != null and gateId != ''"> and gate_id = #{gateId}</if>
+            <if test="verdict != null and verdict != ''"> and verdict = #{verdict}</if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                and date_format(create_time,'%y%m%d') &gt;= date_format(#{params.beginTime},'%y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                and date_format(create_time,'%y%m%d') &lt;= date_format(#{params.endTime},'%y%m%d')
+            </if>
+        </where>
+        order by case_record_id desc
+    </select>
+    
+    <select id="selectAutoTestCaseByCaseRecordId" parameterType="Long" resultMap="AutoTestCaseResult">
+        <include refid="selectAutoTestCaseVo"/>
+        where case_record_id = #{caseRecordId}
+    </select>
+
+    <select id="countFailuresByNode" parameterType="Long" resultType="java.util.HashMap">
+        select actual_failed_node as nodeName, count(1) as failureCount
+        from auto_test_case
+        where verdict = 'FAIL' and actual_failed_node is not null and actual_failed_node != ''
+        <if test="batchId != null"> and batch_id = #{batchId}</if>
+        group by actual_failed_node
+        order by failureCount desc
+    </select>
+        
+    <insert id="insertAutoTestCase" parameterType="AutoTestCase" useGeneratedKeys="true" keyProperty="caseRecordId">
+        insert into auto_test_case
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="batchId != null">batch_id,</if>
+            <if test="batchNo != null and batchNo != ''">batch_no,</if>
+            <if test="caseId != null and caseId != ''">case_id,</if>
+            <if test="serial != null">serial,</if>
+            <if test="gateId != null">gate_id,</if>
+            <if test="passengerName != null">passenger_name,</if>
+            <if test="certType != null">cert_type,</if>
+            <if test="certNo != null">cert_no,</if>
+            <if test="photoUrl != null">photo_url,</if>
+            <if test="sessionId != null">session_id,</if>
+            <if test="expectedAllowPass != null">expected_allow_pass,</if>
+            <if test="expectedFailedNode != null">expected_failed_node,</if>
+            <if test="actualAllowPass != null">actual_allow_pass,</if>
+            <if test="actualFailedNode != null">actual_failed_node,</if>
+            <if test="verdict != null and verdict != ''">verdict,</if>
+            <if test="reasons != null">reasons,</if>
+            <if test="rawCapture != null">raw_capture,</if>
+            <if test="logSlice != null">log_slice,</if>
+            <if test="durationMs != null">duration_ms,</if>
+            <if test="receivedTime != null">received_time,</if>
+            <if test="finishTime != null">finish_time,</if>
+            create_time
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="batchId != null">#{batchId},</if>
+            <if test="batchNo != null and batchNo != ''">#{batchNo},</if>
+            <if test="caseId != null and caseId != ''">#{caseId},</if>
+            <if test="serial != null">#{serial},</if>
+            <if test="gateId != null">#{gateId},</if>
+            <if test="passengerName != null">#{passengerName},</if>
+            <if test="certType != null">#{certType},</if>
+            <if test="certNo != null">#{certNo},</if>
+            <if test="photoUrl != null">#{photoUrl},</if>
+            <if test="sessionId != null">#{sessionId},</if>
+            <if test="expectedAllowPass != null">#{expectedAllowPass},</if>
+            <if test="expectedFailedNode != null">#{expectedFailedNode},</if>
+            <if test="actualAllowPass != null">#{actualAllowPass},</if>
+            <if test="actualFailedNode != null">#{actualFailedNode},</if>
+            <if test="verdict != null and verdict != ''">#{verdict},</if>
+            <if test="reasons != null">#{reasons},</if>
+            <if test="rawCapture != null">#{rawCapture},</if>
+            <if test="logSlice != null">#{logSlice},</if>
+            <if test="durationMs != null">#{durationMs},</if>
+            <if test="receivedTime != null">#{receivedTime},</if>
+            <if test="finishTime != null">#{finishTime},</if>
+            sysdate()
+         </trim>
+    </insert>
+
+    <update id="updateAutoTestCase" parameterType="AutoTestCase">
+        update auto_test_case
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="batchId != null">batch_id = #{batchId},</if>
+            <if test="batchNo != null and batchNo != ''">batch_no = #{batchNo},</if>
+            <if test="caseId != null and caseId != ''">case_id = #{caseId},</if>
+            <if test="serial != null">serial = #{serial},</if>
+            <if test="gateId != null">gate_id = #{gateId},</if>
+            <if test="passengerName != null">passenger_name = #{passengerName},</if>
+            <if test="certType != null">cert_type = #{certType},</if>
+            <if test="certNo != null">cert_no = #{certNo},</if>
+            <if test="photoUrl != null">photo_url = #{photoUrl},</if>
+            <if test="sessionId != null">session_id = #{sessionId},</if>
+            <if test="expectedAllowPass != null">expected_allow_pass = #{expectedAllowPass},</if>
+            <if test="expectedFailedNode != null">expected_failed_node = #{expectedFailedNode},</if>
+            <if test="actualAllowPass != null">actual_allow_pass = #{actualAllowPass},</if>
+            <if test="actualFailedNode != null">actual_failed_node = #{actualFailedNode},</if>
+            <if test="verdict != null and verdict != ''">verdict = #{verdict},</if>
+            <if test="reasons != null">reasons = #{reasons},</if>
+            <if test="rawCapture != null">raw_capture = #{rawCapture},</if>
+            <if test="logSlice != null">log_slice = #{logSlice},</if>
+            <if test="durationMs != null">duration_ms = #{durationMs},</if>
+            <if test="receivedTime != null">received_time = #{receivedTime},</if>
+            <if test="finishTime != null">finish_time = #{finishTime},</if>
+        </trim>
+        where case_record_id = #{caseRecordId}
+    </update>
+
+    <delete id="deleteAutoTestCaseByCaseRecordId" parameterType="Long">
+        delete from auto_test_case where case_record_id = #{caseRecordId}
+    </delete>
+
+    <delete id="deleteAutoTestCaseByCaseRecordIds" parameterType="String">
+        delete from auto_test_case where case_record_id in 
+        <foreach item="caseRecordId" collection="array" open="(" separator="," close=")">
+            #{caseRecordId}
+        </foreach>
+    </delete>
+
+    <delete id="deleteAutoTestCaseByBatchId" parameterType="Long">
+        delete from auto_test_case where batch_id = #{batchId}
+    </delete>
+</mapper>

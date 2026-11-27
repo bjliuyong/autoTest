@@ -1,0 +1,2 @@
+# 已预打包纯 Python PostgreSQL 驱动 pg8000 至 vendor/ 目录，离线环境无需执行 pip install
+pg8000>=1.31.0

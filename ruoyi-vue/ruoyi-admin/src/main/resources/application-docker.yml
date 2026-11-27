@@ -1,0 +1,15 @@
+# Docker 容器化运行环境专属配置
+ruoyi:
+  profile: /home/ruoyi/uploadPath
+
+spring:
+  redis:
+    host: ${REDIS_HOST:ruoyi-redis}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+  datasource:
+    druid:
+      master:
+        url: jdbc:mysql://${MYSQL_HOST:ruoyi-mysql}:${MYSQL_PORT:3306}/${MYSQL_DB:ry-vue}?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
+        username: ${MYSQL_USER:root}
+        password: ${MYSQL_PASSWORD:password}

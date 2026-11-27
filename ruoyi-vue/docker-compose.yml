@@ -1,0 +1,84 @@
+services:
+  # -----------------------------------------------------------
+  # MySQL 数据库服务 (包含自动化测试与若依基础库全量初始化)
+  # -----------------------------------------------------------
+  ruoyi-mysql:
+    image: mysql:5.7
+    container_name: ruoyi-mysql
+    restart: always
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: ry-vue
+      TZ: Asia/Shanghai
+    volumes:
+      - ./sql/ry_20240629.sql:/docker-entrypoint-initdb.d/01_ry_20240629.sql:ro
+      - ./sql/quartz.sql:/docker-entrypoint-initdb.d/02_quartz.sql:ro
+      - ./sql/autotest.sql:/docker-entrypoint-initdb.d/03_autotest.sql:ro
+      - mysql_data:/var/lib/mysql
+    command: [
+      'mysqld',
+      '--character-set-server=utf8mb4',
+      '--collation-server=utf8mb4_unicode_ci',
+      '--default-time-zone=+08:00',
+      '--max_connections=1000'
+    ]
+    networks:
+      - ruoyi-net
+
+  # -----------------------------------------------------------
+  # Redis 缓存服务
+  # -----------------------------------------------------------
+  ruoyi-redis:
+    image: redis:6.2-alpine
+    container_name: ruoyi-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - redis_data:/data
+    networks:
+      - ruoyi-net
+
+  # -----------------------------------------------------------
+  # 若依后端 Java 应用容器 (包含自动化测试引擎与WebSocket)
+  # -----------------------------------------------------------
+  ruoyi-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ruoyi-backend:3.8.8
+    container_name: ruoyi-backend
+    restart: always
+    depends_on:
+      - ruoyi-mysql
+      - ruoyi-redis
+    ports:
+      - "8080:8080"
+      - "8765:8765"
+    environment:
+      TZ: Asia/Shanghai
+      SPRING_PROFILES_ACTIVE: "druid,docker"
+      MYSQL_HOST: "ruoyi-mysql"
+      MYSQL_PORT: 3306
+      MYSQL_DB: "ry-vue"
+      MYSQL_USER: "root"
+      MYSQL_PASSWORD: "password"
+      REDIS_HOST: "ruoyi-redis"
+      REDIS_PORT: 6379
+    volumes:
+      - ./logs:/home/ruoyi/logs
+      - ./uploadPath:/home/ruoyi/uploadPath
+    networks:
+      - ruoyi-net
+
+networks:
+  ruoyi-net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:

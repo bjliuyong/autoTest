@@ -1,0 +1,28 @@
+# 仅在 Docker 中运行后端 Java 服务 (使用现有/外部 MySQL 与 Redis)
+services:
+  ruoyi-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ruoyi-backend:3.8.8
+    container_name: ruoyi-backend
+    restart: always
+    ports:
+      - "8080:8080"
+      - "8765:8765"
+    environment:
+      TZ: Asia/Shanghai
+      SPRING_PROFILES_ACTIVE: "druid,docker"
+      # 可根据宿主机实际环境替换以下变量
+      MYSQL_HOST: "host.docker.internal"
+      MYSQL_PORT: 3306
+      MYSQL_DB: "ry-vue"
+      MYSQL_USER: "root"
+      MYSQL_PASSWORD: "password"
+      REDIS_HOST: "host.docker.internal"
+      REDIS_PORT: 6379
+    volumes:
+      - ./logs:/home/ruoyi/logs
+      - ./uploadPath:/home/ruoyi/uploadPath
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

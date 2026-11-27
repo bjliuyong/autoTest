@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.autotest.mapper.AutoTestBatchMapper">
+    
+    <resultMap type="AutoTestBatch" id="AutoTestBatchResult">
+        <result property="batchId"         column="batch_id"         />
+        <result property="batchNo"        column="batch_no"         />
+        <result property="batchName"      column="batch_name"       />
+        <result property="status"         column="status"           />
+        <result property="gateWsUrl"      column="gate_ws_url"      />
+        <result property="logWsUrl"       column="log_ws_url"       />
+        <result property="totalCases"     column="total_cases"      />
+        <result property="passCases"      column="pass_cases"       />
+        <result property="failCases"      column="fail_cases"       />
+        <result property="timeoutCases"   column="timeout_cases"    />
+        <result property="passRate"       column="pass_rate"        />
+        <result property="startTime"      column="start_time"       />
+        <result property="endTime"        column="end_time"         />
+        <result property="durationSeconds" column="duration_seconds" />
+        <result property="remark"         column="remark"           />
+        <result property="createBy"       column="create_by"        />
+        <result property="createTime"     column="create_time"      />
+        <result property="updateBy"       column="update_by"        />
+        <result property="updateTime"     column="update_time"      />
+    </resultMap>
+
+    <sql id="selectAutoTestBatchVo">
+        select batch_id, batch_no, batch_name, status, gate_ws_url, log_ws_url, total_cases, pass_cases, fail_cases, timeout_cases, pass_rate, start_time, end_time, duration_seconds, remark, create_by, create_time, update_by, update_time from auto_test_batch
+    </sql>
+
+    <select id="selectAutoTestBatchList" parameterType="AutoTestBatch" resultMap="AutoTestBatchResult">
+        <include refid="selectAutoTestBatchVo"/>
+        <where>  
+            <if test="batchNo != null and batchNo != ''"> and batch_no like concat('%', #{batchNo}, '%')</if>
+            <if test="batchName != null and batchName != ''"> and batch_name like concat('%', #{batchName}, '%')</if>
+            <if test="status != null and status != ''"> and status = #{status}</if>
+            <if test="params.beginTime != null and params.beginTime != ''">
+                and date_format(create_time,'%y%m%d') &gt;= date_format(#{params.beginTime},'%y%m%d')
+            </if>
+            <if test="params.endTime != null and params.endTime != ''">
+                and date_format(create_time,'%y%m%d') &lt;= date_format(#{params.endTime},'%y%m%d')
+            </if>
+        </where>
+        order by batch_id desc
+    </select>
+    
+    <select id="selectAutoTestBatchByBatchId" parameterType="Long" resultMap="AutoTestBatchResult">
+        <include refid="selectAutoTestBatchVo"/>
+        where batch_id = #{batchId}
+    </select>
+
+    <select id="selectAutoTestBatchByBatchNo" parameterType="String" resultMap="AutoTestBatchResult">
+        <include refid="selectAutoTestBatchVo"/>
+        where batch_no = #{batchNo}
+    </select>
+
+    <select id="selectLatestBatch" resultMap="AutoTestBatchResult">
+        <include refid="selectAutoTestBatchVo"/>
+        order by batch_id desc limit 1
+    </select>
+        
+    <insert id="insertAutoTestBatch" parameterType="AutoTestBatch" useGeneratedKeys="true" keyProperty="batchId">
+        insert into auto_test_batch
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="batchNo != null and batchNo != ''">batch_no,</if>
+            <if test="batchName != null">batch_name,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="gateWsUrl != null">gate_ws_url,</if>
+            <if test="logWsUrl != null">log_ws_url,</if>
+            <if test="totalCases != null">total_cases,</if>
+            <if test="passCases != null">pass_cases,</if>
+            <if test="failCases != null">fail_cases,</if>
+            <if test="timeoutCases != null">timeout_cases,</if>
+            <if test="passRate != null">pass_rate,</if>
+            <if test="startTime != null">start_time,</if>
+            <if test="endTime != null">end_time,</if>
+            <if test="durationSeconds != null">duration_seconds,</if>
+            <if test="remark != null">remark,</if>
+            <if test="createBy != null">create_by,</if>
+            create_time
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="batchNo != null and batchNo != ''">#{batchNo},</if>
+            <if test="batchName != null">#{batchName},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="gateWsUrl != null">#{gateWsUrl},</if>
+            <if test="logWsUrl != null">#{logWsUrl},</if>
+            <if test="totalCases != null">#{totalCases},</if>
+            <if test="passCases != null">#{passCases},</if>
+            <if test="failCases != null">#{failCases},</if>
+            <if test="timeoutCases != null">#{timeoutCases},</if>
+            <if test="passRate != null">#{passRate},</if>
+            <if test="startTime != null">#{startTime},</if>
+            <if test="endTime != null">#{endTime},</if>
+            <if test="durationSeconds != null">#{durationSeconds},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="createBy != null">#{createBy},</if>
+            sysdate()
+         </trim>
+    </insert>
+
+    <update id="updateAutoTestBatch" parameterType="AutoTestBatch">
+        update auto_test_batch
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="batchNo != null and batchNo != ''">batch_no = #{batchNo},</if>
+            <if test="batchName != null">batch_name = #{batchName},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="gateWsUrl != null">gate_ws_url = #{gateWsUrl},</if>
+            <if test="logWsUrl != null">log_ws_url = #{logWsUrl},</if>
+            <if test="totalCases != null">total_cases = #{totalCases},</if>
+            <if test="passCases != null">pass_cases = #{passCases},</if>
+            <if test="failCases != null">fail_cases = #{failCases},</if>
+            <if test="timeoutCases != null">timeout_cases = #{timeoutCases},</if>
+            <if test="passRate != null">pass_rate = #{passRate},</if>
+            <if test="startTime != null">start_time = #{startTime},</if>
+            <if test="endTime != null">end_time = #{endTime},</if>
+            <if test="durationSeconds != null">duration_seconds = #{durationSeconds},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </trim>
+        where batch_id = #{batchId}
+    </update>
+
+    <delete id="deleteAutoTestBatchByBatchId" parameterType="Long">
+        delete from auto_test_batch where batch_id = #{batchId}
+    </delete>
+
+    <delete id="deleteAutoTestBatchByBatchIds" parameterType="String">
+        delete from auto_test_batch where batch_id in 
+        <foreach item="batchId" collection="array" open="(" separator="," close=")">
+            #{batchId}
+        </foreach>
+    </delete>
+</mapper>
